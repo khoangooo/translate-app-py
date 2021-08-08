@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+    <style type="text/css">
+      th:tr {
+        color: blue;
+      }
+      tr:nth-of-type(2n) {
+        border: 1px solid black;
+        background-color: rgba(150, 150, 150, 0.5);
+      }
+
+      td {
+        padding: 8px 8px;
+        border: 1px solid black;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <table style="margin-left: 20px" id="table">
+        <tr style="color: green">
+          <th>id</th>
+          <th>Từ gốc</th>
+          <th>Google dịch</th>
+          <th>Từ dịch lại</th>
+        </tr>
+
+        {% for i in range(0, len_arr)%}
+
+        <tr>
+          <form id='{{"form_" + i|string}}'>
+            <td>{{i}}</td>
+            <td id='{{"original_text_" + i|string}}'>
+              {{translations_arr[i]["origin"]}}
+            </td>
+            <td style="width: 100px">
+              {{translations_arr[i]["google_translate"]}}
+            </td>
+            <td style="width: 100px">
+              <input
+                type="text"
+                name='{{"tranlstated_text_modified_" + i|string}}'
+                id='{{"tranlstated_text_modified_" + i|string}}'
+                value='{{ translations_arr[i]["translated_text"] != None and
+            translations_arr[i]["translated_text"] or "" }}'
+              />
+            </td>
+            <td>
+              <input
+                type="submit"
+                value="save"
+                id='{{"submit_btn_" +  + i|string}}'
+              />
+            </td>
+          </form>
+        </tr>
+
+        {% endfor %}
+      </table>
+    </div>
+    <script>
+      const translations_arr = '{{translations_arr | tojson | safe}}';
+      const newArr = JSON.parse(translations_arr);
+      async function postData(url = "", data = {}) {
+        // Default options are marked with *
+        const response = await fetch(url, {
+          method: "POST", // *GET, POST, PUT, DELETE, etc.
+          mode: "cors", // no-cors, *cors, same-origin
+          cache: "no-cache", // *default, no-cache, reload, force-cache, only-if-cached
+          credentials: "same-origin", // include, *same-origin, omit
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          redirect: "follow", // manual, *follow, error
+          referrerPolicy: "no-referrer", // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url
+          body: JSON.stringify(data), // body data type must match "Content-Type" header
+        });
+        return response.json(); // parses JSON response into native JavaScript objects
+      }
+      for (let i in newArr) {
+        const myForm = document.getElementById(`form_${i}`);
+        myForm.addEventListener("submit", async function (e) {
+          e.preventDefault();
+          const tcell = document.getElementById(`original_text_${i}`)
+          const formItem = {};
+          formItem.original_text = tcell.innerText;
+          formItem.translated_text =
+            myForm.elements[`tranlstated_text_modified_${i}`].value;
+          const res = await postData("/", formItem);
+          alert("success");
+        });
+      }
+    </script>
+  </body>
+</html>
