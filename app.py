@@ -1,5 +1,5 @@
-from flask import Flask, render_template, request, jsonify
-from flask.json import jsonify
+import re
+from flask import Flask, render_template, request
 from googletrans import Translator
 import sqlite3
 import traceback
@@ -11,20 +11,21 @@ translator = Translator()
 f = open("data.json")
 data = json.load(f)
 
-database_path = "translate_app.db"
+# database_path = "translate_app.db"
+database_path = "collection.anki2"
 
 
-def insert_data(path_db):
+def insert_data():
 
     try:
-        conn = sqlite3.connect(path_db)
+        conn = sqlite3.connect(database_path)
         cursor = conn.cursor()
         print("Successfully Connected to SQLite")
 
         # translate and insert new record
-       
+
         raw_arr = data["data"]
-        translations = translator.translate(raw_arr, dest="vi")
+        translations = translator.translate(raw_arr, src="fr", dest="vi")
         for translation in translations:
             sqlite_insert_query = """INSERT INTO vocabulary
                     (original_text, google_translate, translated_text)  VALUES  (?, ?, ?)"""
@@ -54,69 +55,159 @@ def insert_data(path_db):
             print("The SQLite connection is closed")
 
 
-def select_data(path_db):
+def select_many_records(req):
     try:
-        conn = sqlite3.connect(path_db, timeout=20)
+        limit = ("per_page" in req and int(req["per_page"])) or 20
+        page_number = ("page_number" in req and int(req["page_number"])) or 1
+        offset = limit * (page_number - 1)
+
+        conn = sqlite3.connect(database_path, timeout=20)
         cursor = conn.cursor()
-        print("Connected to SQLite")
 
-        sqlite_select_query = """SELECT * from vocabulary"""
-        cursor.execute(sqlite_select_query)
+        sqlite_rows_count = """SELECT COUNT(*) FROM notes"""
+        cursor.execute(sqlite_rows_count)
+        number_of_rows = cursor.fetchone()
+
+        sqlite_select_query = """SELECT * FROM notes LIMIT ? OFFSET ?;"""
+        cursor.execute(sqlite_select_query, (limit, offset))
+
         records = cursor.fetchall()
-
         translations_arr = []
         for row in records:
+            item = list(row)
             newItem = {
-                "id": row[0],
-                "origin": row[1],
-                "google_translate": row[2],
-                "translated_text": row[3],
+                "id": item[0],
+                "origin": item[7],
+                "translated_text": item[11],
             }
             translations_arr.append(newItem)
 
         cursor.close()
-        return translations_arr
-
+        pagination = {
+            "total": number_of_rows[0],
+            "per_page": limit,
+            "page_number": page_number,
+        }
+        return (
+            json.dumps(
+                {
+                    "status": True,
+                    "msg": "Lấy dữ liệu thành công",
+                    "data": translations_arr,
+                    "pagination": pagination,
+                }
+            ),
+            200,
+            {"ContentType": "application/json"},
+        )
     except sqlite3.Error as error:
-        print("Failed to read data from sqlite table", error)
-    finally:
-        if conn:
-            conn.close()
-            print("The Sqlite connection is closed")
+        print("Failed to update sqlite table", error)
+        return (
+            json.dumps(
+                {
+                    "status": False,
+                    "msg": "Lấy dữ liệu không thành công",
+                }
+            ),
+            400,
+            {"ContentType": "application/json"},
+        )
 
-def update_data(item, path_db):
+def select_one_record(req):
     try:
-        conn = sqlite3.connect(path_db)
-        cursor = conn.cursor()
-        print("Connected to SQLite")
+        _id = req["_id"]
 
-        sql_update_query = """UPDATE vocabulary SET translated_text = ? where original_text = ?"""
-        cursor.execute(sql_update_query, (item["translated_text"], item["original_text"]))
-        conn.commit()
-        print(item["translated_text"], item["original_text"])
-        print("Record Updated successfully ")
+        conn = sqlite3.connect(database_path, timeout=20)
+        cursor = conn.cursor()
+
+        sqlite_select_query = """SELECT * FROM notes WHERE id = ?"""
+        cursor.execute(sqlite_select_query, ([_id]))
+
+        record = cursor.fetchone()
+        item = {
+            "id": record[0],
+            "origin": record[7],
+            "translated_text": record[11],
+        }
+
         cursor.close()
+
+        return (
+            json.dumps(
+                {
+                    "status": True,
+                    "msg": "Lấy dữ liệu thành công",
+                    "data": item,
+                }
+            ),
+            200,
+            {"ContentType": "application/json"},
+        )
+    except sqlite3.Error as error:
+        print("Failed to update sqlite table", error)
+        return (
+            json.dumps(
+                {
+                    "status": False,
+                    "msg": "Lấy dữ liệu không thành công",
+                }
+            ),
+            400,
+            {"ContentType": "application/json"},
+        )
+
+
+def update_data(req):
+    try:
+        _id = req["_id"]
+        translated_text = req["translated_text"] or None
+
+        conn = sqlite3.connect(database_path)
+        cursor = conn.cursor()
+
+        sql_update_query = """UPDATE notes SET translate = ? WHERE id = ? """
+        cursor.execute(sql_update_query, (translated_text, _id))
+        conn.commit()
+        cursor.close()
+
+        return (
+            json.dumps({"status": True, "msg": "Thêm dữ liệu thành công"}),
+            200,
+            {"ContentType": "application/json"},
+        )
 
     except sqlite3.Error as error:
         print("Failed to update sqlite table", error)
-    finally:
-        if conn:
-            conn.close()
-            print("The SQLite connection is closed")
+        return (
+            json.dumps({"status": False, "msg": "Thêm dữ liệu KHÔNG thành công"}),
+            400,
+            {"ContentType": "application/json"},
+        )
 
-@app.route("/", methods=["GET", "POST"])
-def main():
-    # insert_data(database_path)
-    translations_arr = []
-    if request.method == "GET":
-        translations_arr = select_data(database_path) != None and select_data(database_path) or []
+
+@app.route("/")
+def fetchAll():
+    req = request.args.to_dict()
+    res = select_many_records(req)
+    return res
+
+
+@app.route("/<int:_id>")
+def fetchOne(_id):
+    # req = request.get_json()
+    req = {"_id": _id}
+    response = select_one_record(req)
+    return response
         
-    if request.method == "POST":
-        data_from_form = request.get_json()
-        update_data(data_from_form, database_path)
-        # translations_arr = select_data(database_path) != None and select_data(database_path) or []
+@app.route("/<int:_id>", methods=["PUT"])
+def update(_id):
+    # req = request.get_json()
+    if request.method == "PUT":
+        req = request.get_json()
+        req["_id"] = _id
+        res = update_data(req)
+        return res
 
-    return render_template("index.html", len_arr=len(translations_arr), translations_arr=translations_arr)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", debug=True, port=3001)
